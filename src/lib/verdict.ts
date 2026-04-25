@@ -39,8 +39,19 @@ const SCALE: VerdictDescriptor[] = [
   },
 ];
 
-export function deriveVerdict(irr: number | null): VerdictDescriptor {
+export function deriveVerdict(
+  irr: number | null,
+  leverageRatio?: number | null,
+): VerdictDescriptor {
   if (irr === null) {
+    if (leverageRatio && leverageRatio >= 5) {
+      return {
+        verdict: "unscored",
+        label: "纯保障型",
+        summary: `保费杠杆比 ${leverageRatio.toFixed(1)} 倍，这是一份典型的保障型产品，不适合用 IRR 衡量，核心价值在于风险转移。`,
+      };
+    }
+
     return SCALE[0];
   }
 

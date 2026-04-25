@@ -41,6 +41,31 @@ function buildRecord(
   };
 }
 
+function migratePersistedRecords(
+  records: Record<string, AnalysisRecord> | undefined,
+): Record<string, AnalysisRecord> {
+  if (!records) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(records)
+      .filter(([, record]) => typeof record === "object" && record !== null && "contract" in record)
+      .map(([id, record]) => {
+        const normalized = normalizeContract(record.contract);
+
+        return [
+          id,
+          {
+            ...record,
+            contract: normalized,
+            result: analyzeContract(normalized),
+          },
+        ];
+      }),
+  );
+}
+
 export const useAnalysisStore = create<AnalysisState>()(
   persist(
     (set) => ({
@@ -83,7 +108,22 @@ export const useAnalysisStore = create<AnalysisState>()(
     }),
     {
       name: ANALYSIS_STORAGE_KEY,
+      version: 1,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState) => {
+        const state = (persistedState ?? {}) as Partial<AnalysisState>;
+        const records = migratePersistedRecords(
+          state.records as Record<string, AnalysisRecord> | undefined,
+        );
+        const order = Array.isArray(state.order)
+          ? state.order.filter((id): id is string => typeof id === "string" && id in records)
+          : Object.keys(records);
+
+        return {
+          records,
+          order,
+        };
+      },
       partialize: (state) => ({
         records: state.records,
         order: state.order,

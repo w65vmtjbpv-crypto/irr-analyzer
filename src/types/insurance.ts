@@ -44,6 +44,8 @@ export interface Benefit {
 export interface SurrenderValue {
   year: number;
   amount: number;
+  /** Optimistic cash value (e.g. right side of "/" in conditional tables) */
+  amountOptimistic?: number;
 }
 
 export interface IRRResult {
@@ -105,8 +107,20 @@ export interface ComparisonSeriesPoint {
   [key: string]: number;
 }
 
+export interface KeyTimePointIRR {
+  year: number;
+  irr: number | null;
+  irrOptimistic: number | null;
+  surrenderValue: number;
+  surrenderValueOptimistic: number | null;
+  totalPaid: number;
+}
+
 export interface AnalysisResult {
   irr: IRRResult;
+  irrOptimistic: IRRResult | null;
+  realIRR: number | null;
+  keyTimePointIRRs: KeyTimePointIRR[];
   cashflows: YearCashflow[];
   cumulativeCashflows: YearCumulative[];
   breakEvenYear: number | null;
@@ -118,7 +132,9 @@ export interface AnalysisResult {
   verdict: Verdict;
   verdictLabel: string;
   verdictSummary: string;
+  interpretation: string[];
   notes: string[];
+  dataWarnings: string[];
 }
 
 export interface AnalysisRecord {

@@ -8,7 +8,7 @@
   --border: #121212;
   --muted: #5f554c;
   --muted-strong: #2e2924;
-  --accent: #d9ff43;
+  --accent: #4caf50;
   --accent-amber: #ff8b2b;
   --accent-red: #ff5030;
   --accent-purple: #5d57ff;
@@ -36,7 +36,7 @@ body {
     "PingFang SC",
     sans-serif;
   background-image:
-    radial-gradient(circle at 15% 15%, rgba(217, 255, 67, 0.22), transparent 24%),
+    radial-gradient(circle at 15% 15%, rgba(76, 175, 80, 0.15), transparent 24%),
     radial-gradient(circle at 85% 18%, rgba(255, 139, 43, 0.18), transparent 22%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent 28%);
 }
@@ -60,7 +60,7 @@ a {
 }
 
 ::selection {
-  background: rgba(217, 255, 67, 0.7);
+  background: rgba(76, 175, 80, 0.3);
   color: #111111;
 }
 
@@ -108,7 +108,7 @@ h6 {
 
 .brutal-panel-accent {
   background:
-    linear-gradient(180deg, rgba(217, 255, 67, 0.68), rgba(217, 255, 67, 0.3)),
+    linear-gradient(180deg, rgba(76, 175, 80, 0.18), rgba(76, 175, 80, 0.06)),
     var(--surface);
   border: 3px solid var(--border);
   border-radius: 22px;

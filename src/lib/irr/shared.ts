@@ -118,6 +118,8 @@ export function findBracket(
     { lo, hi, steps: 600 },
     { lo: -0.95, hi: 2, steps: 1200 },
     { lo: -0.95, hi: 5, steps: 2000 },
+    { lo: -0.999, hi: 0.001, steps: 2000 },
+    { lo: -0.999, hi: 10, steps: 3000 },
   ];
 
   for (const window of searchWindows) {

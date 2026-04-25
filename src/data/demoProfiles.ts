@@ -178,6 +178,9 @@ export function toDemoRecord(contract: InsuranceContract, id: string): AnalysisR
         confidence: "low",
         method: "pending",
       },
+      irrOptimistic: null,
+      realIRR: null,
+      keyTimePointIRRs: [],
       cashflows: [],
       cumulativeCashflows: [],
       breakEvenYear: null,
@@ -189,7 +192,9 @@ export function toDemoRecord(contract: InsuranceContract, id: string): AnalysisR
       verdict: "poor",
       verdictLabel: "",
       verdictSummary: "",
+      interpretation: [],
       notes: [],
+      dataWarnings: [],
     },
   };
 }

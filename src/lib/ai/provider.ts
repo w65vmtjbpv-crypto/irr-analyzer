@@ -1,11 +1,14 @@
 import { createAnthropicProvider } from "@/lib/ai/anthropic";
 import { createCustomProvider } from "@/lib/ai/custom";
 import { createOpenAICompatibleProvider } from "@/lib/ai/openai";
+import type { UploadAsset } from "@/lib/uploadAssets";
 import type { DocumentType, InsuranceContract } from "@/types/insurance";
+import type { InterpretationPromptInput } from "@/types/interpretation";
 
 export interface AIProvider {
   name: string;
-  extractContract(pdfBase64: string): Promise<InsuranceContract>;
+  extractContract(assets: UploadAsset[], userContext?: string): Promise<InsuranceContract>;
+  interpretAnalysis(input: InterpretationPromptInput): Promise<string[]>;
 }
 
 export interface AIConfig {
@@ -74,6 +77,29 @@ function readStringArrayField(record: Record<string, unknown>, key: string): str
   return items.length > 0 ? items : undefined;
 }
 
+export function parseInterpretationPayload(payload: unknown): string[] {
+  const parsed =
+    typeof payload === "string" ? (JSON.parse(payload) as unknown) : payload;
+
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("AI 解读返回内容不是合法对象。");
+  }
+
+  const root = parsed as Record<string, unknown>;
+  const lines = Array.isArray(root.lines) ? root.lines : [];
+  const normalized = lines
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+
+  if (normalized.length === 0) {
+    throw new Error("AI 解读未返回有效 lines。");
+  }
+
+  return normalized;
+}
+
 export function parseContractPayload(payload: unknown): InsuranceContract {
   const parsed =
     typeof payload === "string" ? (JSON.parse(payload) as unknown) : payload;
@@ -105,10 +131,19 @@ export function parseContractPayload(payload: unknown): InsuranceContract {
       })),
     surrenderValues: surrenderValues
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-      .map((item) => ({
-        year: readNumberField(item, "year"),
-        amount: readNumberField(item, "amount"),
-      })),
+      .map((item) => {
+        const sv: { year: number; amount: number; amountOptimistic?: number } = {
+          year: readNumberField(item, "year"),
+          amount: readNumberField(item, "amount"),
+        };
+        const optimistic = readNumberField(item, "amountOptimistic");
+
+        if (optimistic > 0 && optimistic !== sv.amount) {
+          sv.amountOptimistic = optimistic;
+        }
+
+        return sv;
+      }),
     deathBenefit: readStringField(root, "deathBenefit"),
     coverageAmount: readNullableNumberField(root, "coverageAmount"),
     documentType: readStringField(root, "documentType", "unknown") as DocumentType,

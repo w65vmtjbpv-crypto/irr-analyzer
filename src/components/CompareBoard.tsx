@@ -17,6 +17,12 @@ export function CompareBoard() {
   );
   const removeRecord = useAnalysisStore((state) => state.removeRecord);
 
+  function handleDelete(id: string, productName: string) {
+    if (window.confirm(`确定要删除「${productName}」的分析记录吗？删除后不可恢复。`)) {
+      removeRecord(id);
+    }
+  }
+
   return (
     <main className="min-h-screen px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -31,7 +37,7 @@ export function CompareBoard() {
             </p>
           </div>
           <Link href="/" className="brutal-button">
-            NEW ANALYSIS
+            新建分析
           </Link>
         </header>
 
@@ -82,14 +88,14 @@ export function CompareBoard() {
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-2">
                         <Link href={`/analysis/${record.id}`} className="brutal-button-secondary px-3 py-1 text-xs">
-                          OPEN
+                          查看
                         </Link>
                         <button
                           type="button"
-                          onClick={() => removeRecord(record.id)}
+                          onClick={() => handleDelete(record.id, record.contract.productName)}
                           className="brutal-button-danger px-3 py-1 text-xs"
                         >
-                          DELETE
+                          删除
                         </button>
                       </div>
                     </td>

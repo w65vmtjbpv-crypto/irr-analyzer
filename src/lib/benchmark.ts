@@ -107,6 +107,15 @@ export function buildComparisonSeries(
   });
 }
 
+export function getBenchmarkRate(
+  benchmarks: BenchmarkRate[],
+  key: string,
+  fallback: number,
+): number {
+  const benchmark = benchmarks.find((item) => item.key === key);
+  return benchmark?.rate ?? fallback;
+}
+
 export function buildBenchmarkComparison(
   contract: InsuranceContract,
   irrFinal: number | null,

@@ -7,11 +7,13 @@ import { Disclaimer } from "@/components/Disclaimer";
 import { IRRDisplay } from "@/components/IRRDisplay";
 import { SurrenderTable } from "@/components/SurrenderTable";
 import { DEFAULT_BENCHMARKS } from "@/constants/benchmarks";
-import { buildBenchmarkComparison, buildComparisonSeries } from "@/lib/benchmark";
+import { analyzeContract } from "@/lib/analysis";
+import { getBenchmarkRate } from "@/lib/benchmark";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import type { AnalysisRecord, BenchmarkRate } from "@/types/insurance";
+import type { InterpretResponseBody } from "@/types/interpretation";
 import Link from "next/link";
-import { useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 interface ResultDashboardProps {
   record: AnalysisRecord;
@@ -30,6 +32,24 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
     DEFAULT_BENCHMARKS.map((benchmark) => ({ ...benchmark })),
   );
   const [copied, setCopied] = useState(false);
+  const [aiInterpretation, setAiInterpretation] = useState<string[] | null>(null);
+  const [interpretationSource, setInterpretationSource] = useState<"loading" | "ai" | "fallback">(
+    "loading",
+  );
+  const [interpretationError, setInterpretationError] = useState<string | null>(null);
+  const deferredBenchmarks = useDeferredValue(benchmarks);
+  const benchmarkSignature = useMemo(
+    () => JSON.stringify(deferredBenchmarks.map((item) => [item.key, item.rate])),
+    [deferredBenchmarks],
+  );
+  const currentResult = useMemo(
+    () => analyzeContract(record.contract, benchmarks),
+    [record.contract, benchmarks],
+  );
+  const currentInflationRate = useMemo(
+    () => getBenchmarkRate(benchmarks, "cpi", 0.02),
+    [benchmarks],
+  );
   const attentionPoints = record.contract.attentionPoints ?? [];
   const riskWarnings = record.contract.riskWarnings ?? [];
   const hasClauseInsights = attentionPoints.length > 0 || riskWarnings.length > 0;
@@ -37,18 +57,60 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
     record.contract.premiumPerYear > 0 ||
     record.contract.benefits.length > 0 ||
     record.contract.surrenderValues.length > 0;
+  const displayedInterpretation = aiInterpretation ?? currentResult.interpretation;
 
-  const benchmarkComparison = buildBenchmarkComparison(
-    record.contract,
-    record.result.irr.final,
-    record.result.insuranceValueSeries,
-    benchmarks,
-  );
-  const comparisonSeries = buildComparisonSeries(
-    record.contract,
-    record.result.insuranceValueSeries,
-    benchmarks,
-  );
+  useEffect(() => {
+    const controller = new AbortController();
+    // Frontend-side timeout: if the whole round-trip exceeds 35s, abort and use fallback
+    const abortTimer = window.setTimeout(() => controller.abort(), 35_000);
+    const timer = window.setTimeout(async () => {
+      setAiInterpretation(null);
+      setInterpretationSource("loading");
+      setInterpretationError(null);
+
+      try {
+        const response = await fetch("/api/interpret", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contract: record.contract,
+            benchmarks: deferredBenchmarks,
+          }),
+          signal: controller.signal,
+        });
+
+        const payload = (await response.json()) as InterpretResponseBody;
+
+        if (!response.ok || !payload.lines || payload.lines.length === 0) {
+          throw new Error(payload.error ?? "AI 解读生成失败。");
+        }
+
+        setAiInterpretation(payload.lines);
+        setInterpretationSource(payload.source === "fallback" ? "fallback" : "ai");
+        setInterpretationError(payload.source === "fallback" ? payload.error ?? null : null);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          // Timed out or unmounted — show fallback silently
+          setInterpretationSource("fallback");
+          setInterpretationError("AI 解读超时，已自动切换到规则版解读。");
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "AI 解读生成失败。";
+        setAiInterpretation(null);
+        setInterpretationSource("fallback");
+        setInterpretationError(message);
+      }
+    }, 450);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+      window.clearTimeout(abortTimer);
+    };
+  }, [benchmarkSignature, deferredBenchmarks, record.contract]);
 
   async function handleCopyLink() {
     await navigator.clipboard.writeText(window.location.href);
@@ -74,30 +136,30 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link href="/" className="brutal-button-secondary">
-              NEW RUN
+              返回首页
             </Link>
             <Link href="/compare" className="brutal-button-secondary">
-              SEE ALL
+              对比全部
             </Link>
             <button
               type="button"
               onClick={() => window.print()}
               className="brutal-button-secondary"
             >
-              EXPORT PDF
+              打印 / 导出
             </button>
             <button
               type="button"
               onClick={handleCopyLink}
               className="brutal-button"
             >
-              {copied ? "LINK COPIED" : "COPY LINK"}
+              {copied ? "已复制（仅本设备可查看）" : "复制链接（仅限本设备）"}
             </button>
           </div>
         </header>
 
         <section className="brutal-card-soft p-6">
-          <div className="grid gap-4 text-sm font-medium text-[var(--muted-strong)] md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 text-sm font-medium text-[var(--muted-strong)] md:grid-cols-2 xl:grid-cols-4">
             <div>
               <span className="text-[var(--muted)]">文档类型</span>
               <p className="mt-1 text-[var(--foreground)]">
@@ -118,24 +180,63 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
                 {record.contract.paymentYears > 0
                   ? `缴 ${record.contract.paymentYears} 年`
                   : "缴费年限未识别"}
+                {record.contract.premiumPerYear > 0 && record.contract.paymentYears > 0
+                  ? `，总保费 ${formatCurrency(record.contract.premiumPerYear * record.contract.paymentYears)}`
+                  : ""}
               </p>
             </div>
             <div>
-              <span className="text-[var(--muted)]">保障期限</span>
-              <p className="mt-1 text-[var(--foreground)]">
-                {record.contract.policyYears > 0
-                  ? `保单按 ${record.contract.policyYears} 年建模`
-                  : "保障期限未识别"}
-              </p>
-            </div>
-            <div>
-              <span className="text-[var(--muted)]">被保人年龄</span>
+              <span className="text-[var(--muted)]">被保人 / 期限</span>
               <p className="mt-1 text-[var(--foreground)]">
                 {record.contract.insuredAge > 0 ? `${record.contract.insuredAge} 岁` : "未识别"}
+                {record.contract.policyYears > 0
+                  ? ` / 保 ${record.contract.policyYears} 年`
+                  : ""}
               </p>
             </div>
           </div>
+          <div className="mt-4 grid gap-3 text-sm font-medium text-[var(--muted-strong)] md:grid-cols-3">
+            <div>
+              <span className="text-[var(--muted)]">现金价值数据</span>
+              <p className="mt-1 text-[var(--foreground)]">
+                {record.contract.surrenderValues.length > 0
+                  ? `已提取 ${record.contract.surrenderValues.length} 个年份`
+                  : "无数据"}
+                {record.contract.surrenderValues.some((sv) => sv.amountOptimistic != null)
+                  ? " / 含双轨制"
+                  : ""}
+              </p>
+            </div>
+            <div>
+              <span className="text-[var(--muted)]">确定给付</span>
+              <p className="mt-1 text-[var(--foreground)]">
+                {record.contract.benefits.filter((b) => b.guaranteed).length > 0
+                  ? `${record.contract.benefits.filter((b) => b.guaranteed).length} 笔`
+                  : "无"}
+              </p>
+            </div>
+            {record.contract.coverageAmount ? (
+              <div>
+                <span className="text-[var(--muted)]">保额</span>
+                <p className="mt-1 text-[var(--foreground)]">{formatCurrency(record.contract.coverageAmount)}</p>
+              </div>
+            ) : null}
+          </div>
         </section>
+
+        {(currentResult.dataWarnings ?? []).length > 0 ? (
+          <section className="brutal-card-soft bg-[rgba(255,80,48,0.08)] p-5">
+            <p className="font-mono text-xs tracking-[0.16em] text-[var(--accent-red)] uppercase">
+              DATA VALIDATION WARNINGS
+            </p>
+            <h3 className="mt-2 text-xl font-bold text-[var(--accent-red)]">数据校验发现异常</h3>
+            <div className="mt-3 grid gap-2 text-sm font-medium leading-7 text-[var(--accent-red)]">
+              {(currentResult.dataWarnings ?? []).map((w) => (
+                <p key={w}>- {w}</p>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {hasClauseInsights ? (
           <section className="grid gap-6 xl:grid-cols-2">
@@ -173,14 +274,100 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
           </section>
         ) : null}
 
-        <IRRDisplay result={record.result} />
+        <IRRDisplay result={currentResult} inflationRate={currentInflationRate} />
+
+        {displayedInterpretation.length > 0 ? (
+          <section className="brutal-card p-5">
+            <div className="mb-5">
+              <p className="font-mono text-xs tracking-[0.16em] text-[var(--accent)] uppercase">
+                PLAIN CHINESE
+              </p>
+              <h3 className="mt-2 text-3xl font-bold text-[var(--foreground)]">先把人话讲清楚。</h3>
+              <p className="mt-2 text-sm font-medium leading-7 text-[var(--muted-strong)]">
+                这部分会优先调用 AI 结合当前 IRR、通胀和基准对比来解释；AI 不可用时，自动回退到规则版解读。
+              </p>
+            </div>
+            <div className="grid gap-3 text-sm font-medium leading-7 text-[var(--muted-strong)]">
+              {displayedInterpretation.map((line) => (
+                <p key={line}>- {line}</p>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs font-semibold">
+              <span className="rounded-full border-[2px] border-[var(--border)] bg-white px-3 py-1 text-[var(--foreground)]">
+                {interpretationSource === "loading"
+                  ? "AI 解读生成中"
+                  : interpretationSource === "ai"
+                    ? "当前展示：AI 解读"
+                    : "当前展示：规则版解读"}
+              </span>
+              {interpretationError ? (
+                <span className="text-[var(--accent-red)]">
+                  AI 暂时不可用：{interpretationError}
+                </span>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        {(currentResult.keyTimePointIRRs ?? []).length > 0 ? (
+          <section className="brutal-card p-5">
+            <div className="mb-5">
+              <p className="font-mono text-xs tracking-[0.16em] text-[var(--accent)] uppercase">
+                IRR BY HOLDING PERIOD
+              </p>
+              <h3 className="mt-2 text-3xl font-bold text-[var(--foreground)]">持有不同年限的 IRR 变化。</h3>
+              <p className="mt-2 text-sm font-medium leading-7 text-[var(--muted-strong)]">
+                不同持有年限退保，IRR 差异很大。以下展示关键年份的年化收益率。
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b-[3px] border-[var(--border)]">
+                    <th className="px-3 py-3 font-mono text-xs tracking-[0.12em] uppercase text-[var(--muted)]">持有年限</th>
+                    <th className="px-3 py-3 font-mono text-xs tracking-[0.12em] uppercase text-[var(--muted)]">现金价值</th>
+                    <th className="px-3 py-3 font-mono text-xs tracking-[0.12em] uppercase text-[var(--muted)]">已缴保费</th>
+                    <th className="px-3 py-3 font-mono text-xs tracking-[0.12em] uppercase text-[var(--muted)]">
+                      IRR{currentResult.irrOptimistic ? "（保守）" : ""}
+                    </th>
+                    {currentResult.irrOptimistic ? (
+                      <th className="px-3 py-3 font-mono text-xs tracking-[0.12em] uppercase text-[var(--muted)]">IRR（乐观）</th>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(currentResult.keyTimePointIRRs ?? []).map((point) => (
+                    <tr key={point.year} className="border-b border-[var(--border)]">
+                      <td className="px-3 py-3 font-semibold text-[var(--foreground)]">第 {point.year} 年</td>
+                      <td className="px-3 py-3 text-[var(--foreground)]">
+                        {formatCurrency(point.surrenderValue)}
+                        {point.surrenderValueOptimistic != null && point.surrenderValueOptimistic !== point.surrenderValue
+                          ? ` ~ ${formatCurrency(point.surrenderValueOptimistic)}`
+                          : ""}
+                      </td>
+                      <td className="px-3 py-3 text-[var(--foreground)]">{formatCurrency(point.totalPaid)}</td>
+                      <td className={`px-3 py-3 font-mono font-bold ${point.irr !== null && point.irr >= 0 ? "text-[var(--accent)]" : "text-[var(--accent-red)]"}`}>
+                        {point.irr !== null ? `${(point.irr * 100).toFixed(2)}%` : "—"}
+                      </td>
+                      {currentResult.irrOptimistic ? (
+                        <td className={`px-3 py-3 font-mono font-bold ${point.irrOptimistic !== null && point.irrOptimistic >= 0 ? "text-[var(--accent)]" : "text-[var(--accent-red)]"}`}>
+                          {point.irrOptimistic !== null ? `${(point.irrOptimistic * 100).toFixed(2)}%` : "—"}
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
 
         {hasCashflowInputs ? (
           <>
             <BenchmarkCards
-              comparisons={benchmarkComparison}
-              breakEvenYear={record.result.breakEvenYear}
-              leverageRatio={record.result.leverageRatio}
+              comparisons={currentResult.benchmarkComparison}
+              breakEvenYear={currentResult.breakEvenYear}
+              leverageRatio={currentResult.leverageRatio}
             />
 
             <section className="brutal-card p-5">
@@ -218,11 +405,11 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
             </section>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <CashflowChart data={record.result.cumulativeCashflows} />
-              <ComparisonChart data={comparisonSeries} benchmarks={benchmarks} />
+              <CashflowChart data={currentResult.cumulativeCashflows} breakEvenYear={currentResult.breakEvenYear} />
+              <ComparisonChart data={currentResult.comparisonSeries} benchmarks={benchmarks} />
             </div>
 
-            <SurrenderTable rows={record.result.surrenderAnalysis} />
+            <SurrenderTable rows={currentResult.surrenderAnalysis} />
           </>
         ) : (
           <section className="brutal-card-soft p-6 text-sm font-medium leading-7 text-[var(--muted-strong)]">
@@ -239,7 +426,7 @@ export function ResultDashboard({ record }: ResultDashboardProps) {
           </div>
           <div className="grid gap-3 text-sm font-medium leading-7 text-[var(--muted-strong)]">
             <p>身故赔付：{record.contract.deathBenefit || "未提供"}</p>
-            {record.result.notes.map((note) => (
+            {currentResult.notes.map((note) => (
               <p key={note}>- {note}</p>
             ))}
           </div>

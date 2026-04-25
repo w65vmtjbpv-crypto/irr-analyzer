@@ -18,7 +18,18 @@ export function computeIRR(cashflows: number[]): IRRResult {
     };
   }
 
-  const newton = calcIRR_Newton(cashflows, 0.03);
+  // Try multiple initial guesses for Newton to handle edge cases
+  const newtonGuesses = [0.03, 0.01, 0.005, 0.001, -0.01, 0.1];
+  let newton: number | null = null;
+
+  for (const guess of newtonGuesses) {
+    newton = calcIRR_Newton(cashflows, guess);
+
+    if (newton !== null) {
+      break;
+    }
+  }
+
   const bisection = calcIRR_Bisection(cashflows, -0.5, 1);
   const brent = calcIRR_Brent(cashflows, -0.5, 1);
 

@@ -1,22 +1,34 @@
 "use client";
 
+import { SUPPORTED_UPLOAD_ACCEPT } from "@/lib/uploadAssets";
 import { useRef, useState } from "react";
 
 interface UploadZoneProps {
   disabled?: boolean;
-  onUpload: (file: File) => void | Promise<void>;
+  selectedCount?: number;
+  onSelectFiles: (files: File[]) => void | Promise<void>;
 }
 
-export function UploadZone({ disabled = false, onUpload }: UploadZoneProps) {
+export function UploadZone({
+  disabled = false,
+  selectedCount = 0,
+  onSelectFiles,
+}: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  function handleFile(file: File | null) {
-    if (!file || disabled) {
+  function handleFiles(files: FileList | File[] | null) {
+    if (!files || disabled) {
       return;
     }
 
-    onUpload(file);
+    const nextFiles = Array.from(files);
+
+    if (nextFiles.length === 0) {
+      return;
+    }
+
+    onSelectFiles(nextFiles);
   }
 
   return (
@@ -40,7 +52,7 @@ export function UploadZone({ disabled = false, onUpload }: UploadZoneProps) {
       onDrop={(event) => {
         event.preventDefault();
         setIsDragging(false);
-        handleFile(event.dataTransfer.files.item(0));
+        handleFiles(event.dataTransfer.files);
       }}
       className={`group brutal-card relative overflow-hidden px-8 py-12 ${
         disabled
@@ -52,27 +64,38 @@ export function UploadZone({ disabled = false, onUpload }: UploadZoneProps) {
     >
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(217,255,67,0.2),transparent_40%)] opacity-80" />
       <div className="relative flex flex-col items-center gap-4 text-center">
-        <div className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-[18px] border-[3px] border-[var(--border)] bg-[var(--accent-red)] px-5 py-4 font-mono text-2xl font-bold text-white shadow-[4px_4px_0_#111111]">
-          PDF
+        <div className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-[18px] border-[3px] border-[var(--border)] bg-[var(--accent-red)] px-3 py-4 font-mono text-lg font-bold text-white shadow-[4px_4px_0_#111111]">
+          FILES
         </div>
         <div className="space-y-2">
           <h3 className="font-mono text-2xl font-bold tracking-[0.12em] text-[var(--foreground)] uppercase">
-            DROP THE PDF.
+            DROP PDFS OR IMAGES.
           </h3>
           <p className="text-sm font-medium leading-7 text-[var(--muted-strong)]">
-            把合同拖进来。我们拆掉销售话术，只留下保费、给付、现金价值和真实 IRR。
+            支持 PDF、JPG、PNG、WEBP、GIF。多张图先选齐，再由你手动确认它们属于同一份材料。
           </p>
         </div>
-        <div className="inline-flex rounded-full border-[3px] border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] shadow-[4px_4px_0_#111111]">
-          CLICK OR DROP. NOW.
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="inline-flex rounded-full border-[3px] border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--foreground)] shadow-[4px_4px_0_#111111]">
+            CLICK OR DROP. STAGE FIRST.
+          </div>
+          {selectedCount > 0 ? (
+            <div className="inline-flex rounded-full border-[3px] border-[var(--border)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] shadow-[4px_4px_0_#111111]">
+              {selectedCount} FILES STAGED
+            </div>
+          ) : null}
         </div>
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf"
+        accept={SUPPORTED_UPLOAD_ACCEPT}
+        multiple
         className="hidden"
-        onChange={(event) => handleFile(event.target.files?.item(0) ?? null)}
+        onChange={(event) => {
+          handleFiles(event.target.files);
+          event.currentTarget.value = "";
+        }}
       />
     </div>
   );
